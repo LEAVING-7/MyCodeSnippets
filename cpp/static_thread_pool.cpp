@@ -10,36 +10,42 @@
 #include <utility>
 #include <vector>
 
-template <auto Next> class Queue {};
-template <typename Item, Item *Item::*Next> class Queue<Next> {
+template <auto Next>
+class Queue {};
+template <typename Item, Item* Item::*Next>
+class Queue<Next> {
 public:
   Queue() noexcept = default;
-  Queue(Queue &&other) noexcept
-      : mHead(std::exchange(other.mHead, nullptr)),
-        mTail(std::exchange(other.mTail, nullptr)) {}
-  Queue &operator=(Queue other) noexcept {
+  Queue(Queue&& other) noexcept : mHead(std::exchange(other.mHead, nullptr)), mTail(std::exchange(other.mTail, nullptr))
+  {
+  }
+  Queue& operator=(Queue other) noexcept
+  {
     std::swap(mHead, other.head);
     std::swap(mTail, other.tail);
     return *this;
   }
-  ~Queue() noexcept {
+  ~Queue() noexcept
+  {
     auto r = empty();
     assert(r);
   }
 
   auto empty() const noexcept -> bool { return mHead == nullptr; }
-  auto popFront() noexcept -> Item * {
+  auto popFront() noexcept -> Item*
+  {
     if (mHead == nullptr) {
       return nullptr;
     }
-    Item *item = std::exchange(mHead, mHead->*Next);
+    Item* item = std::exchange(mHead, mHead->*Next);
     if (item->*Next == nullptr) {
       mTail = nullptr;
     }
     return item;
   }
 
-  auto pushFront(Item *item) noexcept -> void {
+  auto pushFront(Item* item) noexcept -> void
+  {
     item->*Next = mHead;
     mHead = item;
     if (mTail == nullptr) {
@@ -47,7 +53,8 @@ public:
     }
   }
 
-  auto pushBack(Item *item) noexcept -> void {
+  auto pushBack(Item* item) noexcept -> void
+  {
     item->*Next = nullptr;
     if (mTail == nullptr) {
       mHead = item;
@@ -57,11 +64,12 @@ public:
     mTail = item;
   }
 
-  auto append(Queue other) noexcept -> void {
+  auto append(Queue other) noexcept -> void
+  {
     if (other.empty()) {
       return;
     }
-    auto *otherHead = std::exchange(other.mHead, nullptr);
+    auto* otherHead = std::exchange(other.mHead, nullptr);
     if (empty()) {
       mHead = otherHead;
     } else {
@@ -70,7 +78,8 @@ public:
     mTail = std::exchange(other.mTail, nullptr);
   }
 
-  auto preappend(Queue other) noexcept -> void {
+  auto preappend(Queue other) noexcept -> void
+  {
     if (other.empty()) {
       return;
     }
@@ -84,19 +93,20 @@ public:
   }
 
 private:
-  Item *mHead;
-  Item *mTail;
+  Item* mHead;
+  Item* mTail;
 };
 
 struct TaskBase {
-  TaskBase *next;
-  void (*run)(TaskBase *task, std::uint32_t tid) noexcept;
+  TaskBase* next;
+  void (*run)(TaskBase* task, std::uint32_t tid) noexcept;
 };
 
 class StaticThreadPool {
 public:
   StaticThreadPool(std::size_t n = std::thread::hardware_concurrency())
-      : mThreadCount(n), mThreadStates(n), mNextThread(0) {
+      : mThreadCount(n), mThreadStates(n), mNextThread(0)
+  {
     assert(n > 0);
     mThreads.reserve(n);
 
@@ -110,26 +120,26 @@ public:
       throw;
     }
   }
-  ~StaticThreadPool() noexcept {
+  ~StaticThreadPool() noexcept
+  {
     requestStop();
     join();
   }
-  auto enqueue(TaskBase *task) noexcept -> void {
+  auto enqueue(TaskBase* task) noexcept -> void
+  {
     std::uint32_t const threadCount = mThreads.size();
-    std::uint32_t const startIdx =
-        mNextThread.fetch_add(1, std::memory_order_relaxed) % threadCount;
+    std::uint32_t const startIdx = mNextThread.fetch_add(1, std::memory_order_relaxed) % threadCount;
     for (std::uint32_t i = 0; i < threadCount; i++) {
-      auto const idx = (startIdx + i) < threadCount
-                           ? (startIdx + i)
-                           : (startIdx + i - threadCount);
+      auto const idx = (startIdx + i) < threadCount ? (startIdx + i) : (startIdx + i - threadCount);
       if (mThreadStates[idx].tryPush(task)) {
         return;
       }
     }
     mThreadStates[startIdx].push(task);
   }
-  auto requestStop() noexcept -> void {
-    for (auto &state : mThreadStates) {
+  auto requestStop() noexcept -> void
+  {
+    for (auto& state : mThreadStates) {
       state.requestStop();
     }
   }
@@ -137,14 +147,16 @@ public:
 private:
   class ThreadState {
   public:
-    auto tryPop() -> TaskBase * {
+    auto tryPop() -> TaskBase*
+    {
       auto lk = std::unique_lock(mMt, std::try_to_lock);
       if (!lk.owns_lock() || mQueue.empty()) {
         return nullptr;
       }
       return mQueue.popFront();
     }
-    auto pop() -> TaskBase * {
+    auto pop() -> TaskBase*
+    {
       auto lk = std::unique_lock(mMt);
       while (mQueue.empty()) {
         if (mStopRequested) {
@@ -154,27 +166,30 @@ private:
       }
       return mQueue.popFront();
     }
-    auto tryPush(TaskBase *task) -> bool {
+    auto tryPush(TaskBase* task) -> bool
+    {
       auto lk = std::unique_lock(mMt, std::try_to_lock);
       if (!lk.owns_lock()) {
         return false;
       }
-      const auto wasEmpty = mQueue.empty();
+      auto const wasEmpty = mQueue.empty();
       mQueue.pushBack(task);
       if (wasEmpty) {
         mCv.notify_one();
       }
       return true;
     }
-    auto push(TaskBase *task) -> void {
+    auto push(TaskBase* task) -> void
+    {
       auto lk = std::unique_lock(mMt);
-      const auto wasEmpty = mQueue.empty();
+      auto const wasEmpty = mQueue.empty();
       mQueue.pushBack(task);
       if (wasEmpty) {
         mCv.notify_one();
       }
     }
-    auto requestStop() -> void {
+    auto requestStop() -> void
+    {
       auto lk = std::unique_lock(mMt);
       mStopRequested = true;
       mCv.notify_one();
@@ -187,10 +202,11 @@ private:
     bool mStopRequested = false;
   };
 
-  auto run(std::uint32_t tid) noexcept -> void {
+  auto run(std::uint32_t tid) noexcept -> void
+  {
     assert(tid < mThreadCount);
     while (true) {
-      TaskBase *task = nullptr;
+      TaskBase* task = nullptr;
       auto queueIdx = tid;
       while (true) {
         task = mThreadStates[queueIdx].tryPop();
@@ -210,8 +226,9 @@ private:
       task->run(task, tid);
     }
   }
-  auto join() noexcept -> void {
-    for (auto &thread : mThreads) {
+  auto join() noexcept -> void
+  {
+    for (auto& thread : mThreads) {
       thread.join();
     }
     mThreads.clear();
@@ -227,8 +244,9 @@ private:
 auto cnt = std::atomic_uint64_t(0);
 struct Task : TaskBase {
   Task() : TaskBase{nullptr, &Task::run} {}
-  static auto run(TaskBase *task, std::uint32_t tid) noexcept -> void {
-    auto *t = static_cast<Task *>(task);
+  static auto run(TaskBase* task, std::uint32_t tid) noexcept -> void
+  {
+    auto* t = static_cast<Task*>(task);
     cnt.fetch_add(1, std::memory_order_relaxed);
     std::this_thread::sleep_for(std::chrono::nanoseconds(30));
     if (cnt.load(std::memory_order_acquire) == 1'000'000) {
@@ -246,8 +264,9 @@ auto memPool = std::pmr::synchronized_pool_resource(std::pmr::pool_options{
 
 struct PooledTask : TaskBase {
   PooledTask() : TaskBase{nullptr, &PooledTask::run} {}
-  static auto run(TaskBase *task, std::uint32_t tid) noexcept -> void {
-    auto *t = static_cast<PooledTask *>(task);
+  static auto run(TaskBase* task, std::uint32_t tid) noexcept -> void
+  {
+    auto* t = static_cast<PooledTask*>(task);
     cnt.fetch_add(1, std::memory_order_relaxed);
     std::this_thread::sleep_for(std::chrono::nanoseconds(30));
     if (cnt.load(std::memory_order_acquire) == 1'000'000) {
@@ -257,7 +276,8 @@ struct PooledTask : TaskBase {
   }
 };
 auto constexpr kThreadCount = 4;
-auto main() -> int {
+auto main() -> int
+{
   auto now = std::chrono::high_resolution_clock::now();
   {
     auto pool = StaticThreadPool(kThreadCount);
@@ -271,8 +291,7 @@ auto main() -> int {
   }
   assert(cnt.load() == 1'000'000);
   std::cout << std::format(
-      "{}\n", std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::high_resolution_clock::now() - now));
+      "{}\n", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now));
 
   cnt.store(0, std::memory_order_relaxed);
 
@@ -280,8 +299,7 @@ auto main() -> int {
   {
     auto pool = StaticThreadPool(kThreadCount);
     for (int i = 0; i < 1'000'000; i++) {
-      auto task = (PooledTask *)memPool.allocate(sizeof(PooledTask),
-                                                 alignof(PooledTask));
+      auto task = (PooledTask*)memPool.allocate(sizeof(PooledTask), alignof(PooledTask));
       task = new (task) PooledTask();
       pool.enqueue(task);
     }
@@ -292,7 +310,6 @@ auto main() -> int {
   }
   assert(cnt.load() == 1'000'000);
   std::cout << std::format(
-      "{}\n", std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::high_resolution_clock::now() - now));
+      "{}\n", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now));
   return 0;
 }
