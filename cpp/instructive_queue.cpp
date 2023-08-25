@@ -24,8 +24,8 @@ public:
     if (mHead == nullptr) {
       return nullptr;
     }
-    auto *item = std::exchange(mHead, mHead->*Next);
-    if (item == nullptr) {
+    Item *item = std::exchange(mHead, mHead->*Next);
+    if (item->*Next == nullptr) {
       mTail = nullptr;
     }
     return item;
