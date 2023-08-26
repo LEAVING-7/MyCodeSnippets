@@ -5,7 +5,7 @@
 #include <utility>
 
 template <typename T>
-struct makeIntrPtr;
+struct MakeIntr;
 
 template <typename T>
 struct EnableIntrFromThis;
@@ -27,7 +27,7 @@ struct ControlBlock {
 
 template <typename T>
 class IntrPtr {
-  friend struct makeIntrPtr<T>;
+  friend struct MakeIntr<T>;
   friend struct EnableIntrFromThis<T>;
 
 public:
@@ -36,7 +36,7 @@ public:
   IntrPtr(IntrPtr const& other) noexcept : mData(other.mData) { addRef(); }
   IntrPtr& operator=(IntrPtr&& other) noexcept
   {
-    auto old = std::exchange(mData, std::exchange(other.mData, nullptr));
+    [[maybe_unused]] IntrPtr old{std::exchange(mData, std::exchange(other.mData, nullptr))};
     return *this;
   }
   IntrPtr& operator=(IntrPtr const& other) noexcept { return operator=(IntrPtr{other}); }
@@ -63,7 +63,7 @@ private:
 
   auto release() noexcept -> void
   {
-    if (mData != nullptr && mData->mRefCount.fetch_sub(1, std::memory_order_release)) {
+    if (mData != nullptr && mData->mRefCount.fetch_sub(1, std::memory_order_release) == 1) {
       std::atomic_thread_fence(std::memory_order_acquire);
       ::delete mData;
     }
@@ -94,28 +94,80 @@ struct EnableIntrFromThis {
   }
 };
 
-template <typename T>
-struct makeIntrPtr {
-  template <typename... Us>
+template <class T>
+struct MakeIntr {
+  template <class... Us>
     requires std::is_constructible_v<T, Us...>
-  auto operator()(Us&&... us) const -> IntrPtr<T>
+  IntrPtr<T> operator()(Us&&... us) const
   {
-    using value_type = std::remove_cv_t<T>;
-    return IntrPtr<T>{::new ControlBlock<value_type>{(Us &&) us...}};
+    using _UncvTy = std::remove_cv_t<T>;
+    return IntrPtr<T>{::new ControlBlock<_UncvTy>{(Us &&) us...}};
   }
 };
 
-#ifdef INTR_PTR_MAIN_FUNC
+template <typename T>
+inline constexpr MakeIntr<T> makeIntr{};
 
-  #include <iostream>
-  #include <string>
-auto main() -> int
+#define INTR_PTR_MAIN_FUNC
+#ifdef INTR_PTR_MAIN_FUNC
+  #include <cassert>
+struct MyObject : EnableIntrFromThis<MyObject> {
+  int value;
+
+  static auto create(int val) -> IntrPtr<MyObject> { return makeIntr<MyObject>(val); }
+
+  MyObject(int val) : value(val) {}
+};
+
+int main()
 {
-  auto ptr = makeIntrPtr<int>()(2333);
-  auto p2 = ptr;
-  auto p3 = ptr;
-  std::cout << *ptr << '\n';
-  std::cout << ptr.mData->mRefCount << '\n';
+  // Test IntrPtr default constructor and bool conversion
+  IntrPtr<MyObject> ptr1;
+  assert(!ptr1);
+
+  // Test makeIntrPtr to create IntrPtr
+  auto ptr2 = makeIntr<MyObject>(42);
+  assert(ptr2);
+
+  // Test IntrFromThis
+  auto ptr3 = makeIntr<MyObject>(17);
+  assert(ptr3);
+
+  // Test operator* and dereference
+  assert((*ptr3).value == 17);
+
+  // Test reset
+  ptr3.reset();
+  assert(!ptr3);
+
+  // Test IntrPtr move constructor
+  auto ptr4 = std::move(ptr2);
+  assert(ptr4);
+  assert(!ptr2);
+
+  // Test swap
+  ptr3 = std::move(ptr4);
+  ptr3.swap(ptr2);
+  assert(!ptr3);
+  assert(ptr2);
+
+  // Test IntrPtr copy constructor and assignment
+  IntrPtr<MyObject> ptr5 = ptr2;
+  assert(ptr5);
+
+  IntrPtr<MyObject> ptr6;
+  ptr6 = ptr5;
+  assert(ptr6);
+
+  // Test equality comparison
+  assert(ptr5 == ptr6);
+  assert(ptr5 != ptr3);
+
+  // Test nullptr comparison
+  assert(ptr6 != nullptr);
+  assert(ptr3 == nullptr);
+
+  return 0;
 }
 
 #endif
