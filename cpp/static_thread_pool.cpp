@@ -1,101 +1,13 @@
-#include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <format>
 #include <iostream>
 #include <mutex>
-#include <utility>
 #include <vector>
 
-template <auto Next>
-class Queue {};
-template <typename Item, Item* Item::*Next>
-class Queue<Next> {
-public:
-  Queue() noexcept = default;
-  Queue(Queue&& other) noexcept : mHead(std::exchange(other.mHead, nullptr)), mTail(std::exchange(other.mTail, nullptr))
-  {
-  }
-  Queue& operator=(Queue other) noexcept
-  {
-    std::swap(mHead, other.head);
-    std::swap(mTail, other.tail);
-    return *this;
-  }
-  ~Queue() noexcept
-  {
-    auto r = empty();
-    assert(r);
-  }
-
-  auto empty() const noexcept -> bool { return mHead == nullptr; }
-  auto popFront() noexcept -> Item*
-  {
-    if (mHead == nullptr) {
-      return nullptr;
-    }
-    Item* item = std::exchange(mHead, mHead->*Next);
-    if (item->*Next == nullptr) {
-      mTail = nullptr;
-    }
-    return item;
-  }
-
-  auto pushFront(Item* item) noexcept -> void
-  {
-    item->*Next = mHead;
-    mHead = item;
-    if (mTail == nullptr) {
-      mTail = item;
-    }
-  }
-
-  auto pushBack(Item* item) noexcept -> void
-  {
-    item->*Next = nullptr;
-    if (mTail == nullptr) {
-      mHead = item;
-    } else {
-      mTail->*Next = item;
-    }
-    mTail = item;
-  }
-
-  auto append(Queue other) noexcept -> void
-  {
-    if (other.empty()) {
-      return;
-    }
-    auto* otherHead = std::exchange(other.mHead, nullptr);
-    if (empty()) {
-      mHead = otherHead;
-    } else {
-      mTail->*Next = otherHead;
-    }
-    mTail = std::exchange(other.mTail, nullptr);
-  }
-
-  auto preappend(Queue other) noexcept -> void
-  {
-    if (other.empty()) {
-      return;
-    }
-    other.mTail->*Next = mHead;
-    mHead = other.mHead;
-    if (mTail == nullptr) {
-      mTail = other.mTail;
-    }
-    other.mTail = nullptr;
-    other.mHead = nullptr;
-  }
-
-private:
-  Item* mHead;
-  Item* mTail;
-};
+#include "intr_queue.cpp"
 
 struct TaskBase {
   TaskBase* next;
@@ -241,6 +153,8 @@ private:
   std::atomic_uint32_t mNextThread;
 };
 
+#ifdef POOL_MAIN_FUNC
+
 auto cnt = std::atomic_uint64_t(0);
 struct Task : TaskBase {
   Task() : TaskBase{nullptr, &Task::run} {}
@@ -256,7 +170,7 @@ struct Task : TaskBase {
   }
 };
 
-#include <memory_resource>
+  #include <memory_resource>
 auto memPool = std::pmr::synchronized_pool_resource(std::pmr::pool_options{
     .max_blocks_per_chunk = 1024,
     .largest_required_pool_block = 4096,
@@ -313,3 +227,4 @@ auto main() -> int
       "{}\n", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now));
   return 0;
 }
+#endif

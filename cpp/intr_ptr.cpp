@@ -5,6 +5,12 @@
 #include <utility>
 
 template <typename T>
+struct makeIntrPtr;
+
+template <typename T>
+struct EnableIntrFromThis;
+
+template <typename T>
 struct ControlBlock {
   template <typename... Us>
   explicit ControlBlock(Us&&... us) noexcept(noexcept(T{std::declval<Us>()...})) : mRefCount(1)
@@ -21,6 +27,9 @@ struct ControlBlock {
 
 template <typename T>
 class IntrPtr {
+  friend struct makeIntrPtr<T>;
+  friend struct EnableIntrFromThis<T>;
+
 public:
   IntrPtr() = default;
   IntrPtr(IntrPtr&& other) noexcept : mData(std::exchange(other.mData, nullptr)) {}
@@ -60,7 +69,7 @@ private:
     }
   }
 
-private:
+public:
   ControlBlock<value_type>* mData{nullptr};
 };
 
@@ -84,3 +93,29 @@ struct EnableIntrFromThis {
     return ptr;
   }
 };
+
+template <typename T>
+struct makeIntrPtr {
+  template <typename... Us>
+    requires std::is_constructible_v<T, Us...>
+  auto operator()(Us&&... us) const -> IntrPtr<T>
+  {
+    using value_type = std::remove_cv_t<T>;
+    return IntrPtr<T>{::new ControlBlock<value_type>{(Us &&) us...}};
+  }
+};
+
+#ifdef INTR_PTR_MAIN_FUNC
+
+  #include <iostream>
+  #include <string>
+auto main() -> int
+{
+  auto ptr = makeIntrPtr<int>()(2333);
+  auto p2 = ptr;
+  auto p3 = ptr;
+  std::cout << *ptr << '\n';
+  std::cout << ptr.mData->mRefCount << '\n';
+}
+
+#endif

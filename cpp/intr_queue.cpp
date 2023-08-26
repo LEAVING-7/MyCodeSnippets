@@ -4,8 +4,8 @@
 
 template <auto Next>
 class Queue {};
-template <typename Item, Item* Item::*Next>
-class Queue<Next> {
+template <typename Item, Item* Item::*next>
+class Queue<next> {
 public:
   Queue() noexcept = default;
   Queue(Queue&& other) noexcept : mHead(std::exchange(other.mHead, nullptr)), mTail(std::exchange(other.mTail, nullptr))
@@ -23,14 +23,30 @@ public:
     assert(r);
   }
 
+  static auto from(Item* list) noexcept -> Queue
+  {
+    Item* newHead = nullptr;
+    Item* newTail = list;
+    while (list != nullptr) {
+      auto n = list->*next;
+      list->*next = newHead;
+      newHead = list;
+      list = n;
+    }
+    auto q = Queue();
+    q.mHead = newHead;
+    q.mTail = newTail;
+    return q;
+  }
+
   auto empty() const noexcept -> bool { return mHead == nullptr; }
   auto popFront() noexcept -> Item*
   {
     if (mHead == nullptr) {
       return nullptr;
     }
-    Item* item = std::exchange(mHead, mHead->*Next);
-    if (item->*Next == nullptr) {
+    Item* item = std::exchange(mHead, mHead->*next);
+    if (item->*next == nullptr) {
       mTail = nullptr;
     }
     return item;
@@ -38,7 +54,7 @@ public:
 
   auto pushFront(Item* item) noexcept -> void
   {
-    item->*Next = mHead;
+    item->*next = mHead;
     mHead = item;
     if (mTail == nullptr) {
       mTail = item;
@@ -47,11 +63,11 @@ public:
 
   auto pushBack(Item* item) noexcept -> void
   {
-    item->*Next = nullptr;
+    item->*next = nullptr;
     if (mTail == nullptr) {
       mHead = item;
     } else {
-      mTail->*Next = item;
+      mTail->*next = item;
     }
     mTail = item;
   }
@@ -65,7 +81,7 @@ public:
     if (empty()) {
       mHead = otherHead;
     } else {
-      mTail->*Next = otherHead;
+      mTail->*next = otherHead;
     }
     mTail = std::exchange(other.mTail, nullptr);
   }
@@ -75,7 +91,7 @@ public:
     if (other.empty()) {
       return;
     }
-    other.mTail->*Next = mHead;
+    other.mTail->*next = mHead;
     mHead = other.mHead;
     if (mTail == nullptr) {
       mTail = other.mTail;
@@ -84,20 +100,23 @@ public:
     other.mHead = nullptr;
   }
 
+  auto front() noexcept -> Item* { return mHead; }
+  auto back() noexcept -> Item* { return mTail; }
+
 private:
-  Item* mHead;
-  Item* mTail;
+  Item* mHead{nullptr};
+  Item* mTail{nullptr};
 };
 
-struct Item {
-  int value;
-  Item* next;
-};
+#ifdef QUEUE_MAIN_FUNC
 
-#include <iostream>
-
+  #include <iostream>
 int main()
 {
+  struct Item {
+    int value;
+    Item* next;
+  };
   auto queue = Queue<&Item::next>{};
   auto q2 = Queue<&Item::next>{};
   auto q3 = Queue<&Item::next>{};
@@ -115,4 +134,10 @@ int main()
   while (!queue.empty()) {
     std::cout << queue.popFront()->value << '\n';
   }
+
+  for (int i = 0; i < 10; i++) {
+    queue.pushBack(new Item{i});
+  }
+  // Queue<&Item::next>::reverse(queue.);
 }
+#endif
