@@ -13,8 +13,8 @@ public:
   }
   Queue& operator=(Queue other) noexcept
   {
-    std::swap(mHead, other.head);
-    std::swap(mTail, other.tail);
+    std::swap(mHead, other.mHead);
+    std::swap(mTail, other.mTail);
     return *this;
   }
   ~Queue() noexcept
@@ -72,6 +72,27 @@ public:
     mTail = item;
   }
 
+  auto popFront(std::size_t n) noexcept -> Queue
+  {
+    auto q = Queue();
+    q.mHead = mHead;
+    q.mTail = mHead;
+    for (std::size_t i = 1; i < n; i++) {
+      if (q.mTail == nullptr) {
+        break;
+      }
+      q.mTail = q.mTail->*next;
+    }
+    if (q.mTail != nullptr) {
+      mHead = q.mTail->*next;
+      q.mTail->*next = nullptr;
+    } else {
+      mHead = nullptr;
+      mTail = nullptr;
+    }
+    return q;
+  }
+
   auto append(Queue other) noexcept -> void
   {
     if (other.empty()) {
@@ -117,27 +138,41 @@ int main()
     int value;
     Item* next;
   };
+  ::puts("hello");
   auto queue = Queue<&Item::next>{};
   auto q2 = Queue<&Item::next>{};
   auto q3 = Queue<&Item::next>{};
-  for (int i = 0; i < 10; i++) {
-    queue.pushBack(new Item{i});
-  }
+
   for (int i = 0; i < 10; i++) {
     q2.pushBack(new Item{i});
   }
-  for (int i = 0; i < 10; i++) {
-    q3.pushBack(new Item{9999});
+  for (int i = 10; i < 20; i++) {
+    queue.pushBack(new Item{i});
+  }
+  for (int i = 20; i < 30; i++) {
+    q3.pushBack(new Item{i});
   }
   queue.append(std::move(q2));
   queue.preappend(std::move(q3));
+  auto q4 = queue.popFront(10);
+  auto q5 = queue.popFront(10);
+  puts("=================q4==================");
+  while (!q4.empty()) {
+    auto job = q4.popFront();
+    std::cout << job->value << ' ';
+    delete job;
+  }
+  puts("\n=================q5==================");
+  while (!q5.empty()) {
+    auto job = q5.popFront();
+    std::cout << job->value << ' ';
+    delete job;
+  }
+  puts("\n=================queue==================");
   while (!queue.empty()) {
-    std::cout << queue.popFront()->value << '\n';
+    auto job = queue.popFront();
+    std::cout << job->value << ' ';
+    delete job;
   }
-
-  for (int i = 0; i < 10; i++) {
-    queue.pushBack(new Item{i});
-  }
-  // Queue<&Item::next>::reverse(queue.);
 }
 #endif

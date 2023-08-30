@@ -29,14 +29,14 @@ public:
 private:
   atomic_node_pointer mHead{nullptr};
 };
-
+#define INTR_ATOMIC_QUEUE_MAIN_FUNC
 #ifdef INTR_ATOMIC_QUEUE_MAIN_FUNC
 
   #include <iostream>
   #include <latch>
   #include <syncstream>
 
-constexpr auto kNumThreads = 4;
+constexpr auto kNumThreads = 16;
 constexpr auto kNumItems = 1'000'000;
 
 auto main() -> int
@@ -48,12 +48,17 @@ auto main() -> int
 
   auto q = AtomicQueue<&Item::next>{};
   auto threads = std::vector<std::thread>{};
-  threads.reserve(kNumThreads);
+  // threads.reserve();
   auto latch = std::latch{kNumThreads};
   for (int i = 0; i < kNumThreads; i++) {
-    threads[i] = std::thread(
+    threads.emplace_back(
         [&](AtomicQueue<&Item::next>& q, int tid) {
           for (int i = 0; i < kNumItems; i++) {
+            // q.pushFront(new Item{tid * kNumItems + i});
+            // while (q.tryPush(new Item{tid * kNumItems + i})) {
+            // ;
+            // }
+
             q.pushFront(new Item{tid * kNumItems + i});
           }
           latch.count_down();
@@ -61,9 +66,12 @@ auto main() -> int
         std::ref(q), i);
   }
   latch.wait();
+  for (auto& t : threads) {
+    t.join();
+  }
   auto queue = q.popAll();
   auto vec = std::vector<int>{};
-  vec.reserve(400);
+  vec.reserve(kNumItems * kNumThreads);
   while (!queue.empty()) {
     auto item = queue.popFront();
     vec.push_back(item->value);
