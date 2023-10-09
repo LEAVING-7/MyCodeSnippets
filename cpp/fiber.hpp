@@ -34,7 +34,7 @@ static_assert(sizeof(Reg) == 8, "Reg must be 64-bit");
 
 #if defined(MY_FIBER_X64) && !defined(MY_FIBER_WIN)
   // x64 ABI implmentation
-  #define MY_FIBER_IMPL
+  #define MY_FIBER_ASM_IMPL
 
 struct FiberContextInternal {
   Reg rbx;
@@ -113,13 +113,16 @@ _switch_fiber_internal:
 
 #elif defined(MY_FIBER_ARM64) && !defined(MY_FIBER_WIN)
 // ARM64 ABI implmentation
-  #define MY_FIBER_IMPL
+  #define MY_FIBER_ASM_IMPL
+#elif defined(MY_FIBER_WIN)
+// Windows implementation
+struct FiberContextInternal {
+  LPVOID rawFiberHandle{nullptr};
+};
 
-#else
-  #error "Unsupported architecture and platform"
 #endif
 
-#if defined(MY_FIBER_IMPL)
+#if defined(MY_FIBER_ASM_IMPL)
   #if __has_attribute(optnone)
     #define FORCENOINLINE __attribute__((optnone))
   #elif __has_attribute(noinline)
@@ -137,12 +140,12 @@ extern void FORCENOINLINE _switch_fiber_internal(FiberContextInternal* from, Fib
 struct Fiber {
   FiberContextInternal context;
 
-#if defined(MY_FIBER_IMPL)
+#if defined(MY_FIBER_ASM_IMPL)
   void* stackPtr{nullptr};
   std::uint32_t stackSize{0};
 
 #elif defined(MY_FIBER_WIN)
-  bool isThread{false};
+  bool fromThread{false};
 #endif
 };
 
@@ -158,11 +161,17 @@ inline auto createFiber(std::uint32_t stackSize, auto (*target)(void*)->void, vo
   Fiber* fiber = new Fiber{};
   fiber->context = {};
 
-#if defined(MY_FIBER_IMPL)
+#if defined(MY_FIBER_ASM_IMPL)
   fiber->stackPtr = stackAlloc(MY_FIBER_STACK_ALIGNMENT, stackSize);
   fiber->stackSize = stackSize;
 
   if (fiber->stackPtr == nullptr) {
+    delete fiber;
+    return nullptr;
+  }
+  // check stack alignment
+  if ((reinterpret_cast<std::uintptr_t>(fiber->stackPtr) & (MY_FIBER_STACK_ALIGNMENT - 1)) != 0) {
+    std::free(fiber->stackPtr);
     delete fiber;
     return nullptr;
   }
@@ -174,7 +183,8 @@ inline auto createFiber(std::uint32_t stackSize, auto (*target)(void*)->void, vo
   }
 
 #elif defined(MY_FIBER_WIN)
-  // TODO
+  fiber->context.rawFiberHandle = ::CreateFiber(stackSize, target, arg);
+  fiber->fromThread = false;
 #endif
 
   return fiber;
@@ -184,13 +194,14 @@ inline auto createFiberFromThread() -> FiberHandle
 {
   Fiber* fiber = new Fiber;
 
-#if defined(MY_FIBER_IMPL)
+#if defined(MY_FIBER_ASM_IMPL)
   fiber->context = {};
   fiber->stackPtr = nullptr;
   fiber->stackSize = 0;
 
 #elif defined(MY_FIBER_WIN)
-  // TODO
+  fiber->context.rawFiberHandle = ::ConvertThreadToFiber(nullptr);
+  fiber->fromThread = true;
 #endif
 
   return fiber;
@@ -198,28 +209,61 @@ inline auto createFiberFromThread() -> FiberHandle
 
 inline void switchFiber(FiberHandle from, FiberHandle const to)
 {
-#if defined(MY_FIBER_IMPL)
+#if defined(MY_FIBER_ASM_IMPL)
   _switch_fiber_internal(&from->context, &to->context);
 #elif defined(MY_FIBER_WIN)
-  // TODO
+  ::SwitchToFiber(to->context.rawFiberHandle);
 #endif
 }
 
-inline void destroyFiber(FiberHandle fiber, auto (*stackDealloc)(void*) noexcept -> void)
+inline void destroyFiber(FiberHandle fiber, auto (*stackDealloc)(void*)->void)
 {
   if (fiber == nullptr || stackDealloc == nullptr) {
     return;
   }
 
-#if defined(MY_FIBER_IMPL)
+#if defined(MY_FIBER_ASM_IMPL)
   if (fiber->stackPtr != nullptr) {
     stackDealloc(fiber->stackPtr);
     fiber->stackPtr = nullptr;
   }
 
 #elif defined(MY_FIBER_WIN)
-  // TODO
+  if (fiber->fromThread) {
+    ::ConvertFiberToThread();
+  } else {
+    ::DeleteFiber(fiber->context.rawFiberHandle);
+  }
+  fiber->context.rawFiberHandle = nullptr;
+  fiber->fromThread = false;
 #endif
 
   delete fiber;
+}
+
+#include <cstdlib>
+#include <iostream>
+
+// #include "tiny_fiber.h"
+FiberHandle thread_fiber;
+FiberHandle fiber;
+
+void fibermain(void* arg)
+{
+  FiberHandle fiber = *reinterpret_cast<FiberHandle*>(arg);
+  std::cout << "hello fiber " << std::endl;
+  switchFiber(fiber, thread_fiber);
+}
+
+int main(int argc, char** argv)
+{
+  int const stack_size = 1024 * 16;
+  thread_fiber = createFiberFromThread(); // this thread context
+  fiber = createFiber(stack_size, fibermain, &fiber, ::aligned_alloc);
+  switchFiber(thread_fiber, fiber);
+  ::puts("hooray!");
+
+  destroyFiber(fiber, free);
+  destroyFiber(thread_fiber, free);
+  return 0;
 }
