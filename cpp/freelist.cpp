@@ -1,3 +1,4 @@
+#pragma once
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -7,13 +8,15 @@
 #include <vector>
 
 template <class T>
+  requires std::is_swappable_v<T>
 class FreeList {
  public:
   struct Item {
     explicit Item(uint32_t idx) : look_up_idx_(idx) {}
 
     template <class... Args>
-    auto ConstructInPlace(Args &&...args) {
+    auto ConstructInPlace(Args &&...args) noexcept(
+        std::is_nothrow_constructible_v<T, Args...>) {
       std::construct_at(Get(), std::forward<Args>(args)...);
     }
 
@@ -21,11 +24,11 @@ class FreeList {
       std::destroy_at(Get());
     }
 
-    auto Get() -> T * {
+    auto Get() noexcept -> T * {
       return std::launder(reinterpret_cast<T *>(data_.data()));
     }
 
-    auto Get() const -> T const * {
+    auto Get() const noexcept -> T const * {
       return std::launder(reinterpret_cast<T const *>(data_.data()));
     }
 
@@ -71,7 +74,8 @@ class FreeList {
     auto &last_look_up = look_up_[last_data.look_up_idx_];
 
     std::swap(last_look_up, current_look_up);
-    std::swap(last_data, current_data);
+    std::swap(last_data.data_, current_data.data_);
+    std::swap(last_data.look_up_idx_, current_data.look_up_idx_);
     last_data.DestroyInPlace();
     len_--;
   }
@@ -97,6 +101,7 @@ class FreeList {
 
   auto Items() const -> std::span<Item const> { return {data_.data(), len_}; }
 
+ private:
   size_t len_{0};
   std::vector<Item> data_;
   std::vector<uint32_t> look_up_;
@@ -104,6 +109,7 @@ class FreeList {
 
 struct FooBar {
   explicit FooBar(int i) : i_(i) {}
+
   int i_;
 };
 
@@ -125,9 +131,7 @@ void InsertGetMany() {
   assert(free_list.Size() == 100);
 }
 
-void InsertGetRemoveMany() {
-  FreeList<FooBar> free_list;
-
+void InsertGetRemoveMany(FreeList<FooBar> &free_list) {
   std::vector<uint32_t> keys;
   for (int i = 0; i < 100; i++) {
     for (int j = 0; j < 100; j++) {
@@ -151,13 +155,11 @@ static auto Gen() -> FooBar {
   return FooBar{i++};
 }
 
-auto main(int argc, char *argv[]) -> int {
+void InsertGetRemoveAll() {
   InsertGetRemoveOne();
   InsertGetMany();
-  InsertGetRemoveMany();
-
   FreeList<FooBar> free_list;
-
+  InsertGetRemoveMany(free_list);
   auto i0 = free_list.Allocate(Gen());
   assert(free_list.Get(i0).i_ == 0);
   auto i1 = free_list.Allocate(Gen());
@@ -197,5 +199,9 @@ auto main(int argc, char *argv[]) -> int {
   free_list.Deallocate(i9);
   assert(free_list.Size() == 0);
 
-  return 0;
+  InsertGetRemoveMany(free_list);
+}
+
+auto main(int argc, char *argv[]) -> int {
+ InsertGetRemoveAll();
 }
