@@ -1,0 +1,82 @@
+#pragma once
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <stop_token>
+
+template <typename T>
+class BoundedQueue {
+ public:
+  explicit BoundedQueue(size_t capacity) : capacity_(capacity) {}
+
+  void Push(T &&item) {
+    {
+      std::unique_lock<std::mutex> lk(mutex_);
+      not_full_.wait(lk, [this]() { return content_.size() < capacity_; });
+      content_.push_back(std::move(item));
+    }
+    not_empty_.notify_one();
+  }
+
+  auto TryPush(T &&item) -> bool {
+    {
+      std::unique_lock<std::mutex> lk(mutex_);
+      if (content_.size() == capacity_) {
+        return false;
+      }
+      content_.push_back(std::move(item));
+    }
+    not_empty_.notify_one();
+    return true;
+  }
+
+  void Pop(T &item) {
+    {
+      std::unique_lock<std::mutex> lk(mutex_);
+      not_empty_.wait(lk, [this]() { return !content_.empty(); });
+      item = std::move(content_.front());
+      content_.pop_front();
+    }
+    not_full_.notify_one();
+  }
+
+  auto TryPop(T &item) -> bool {
+    {
+      std::unique_lock<std::mutex> lk(mutex_);
+      if (content_.empty()) {
+        return false;
+      }
+      item = std::move(content_.front());
+      content_.pop_front();
+    }
+    not_full_.notify_one();
+    return true;
+  }
+
+  void Push(std::stop_token const &tok, T &&item) {
+    {
+      std::unique_lock<std::mutex> lk(mutex_);
+      not_full_.wait(lk, tok, [this]() { return content_.size() < capacity_; });
+      content_.push_back(std::move(item));
+    }
+    not_empty_.notify_one();
+  }
+
+  void Pop(std::stop_token const &tok, T &item) {
+    {
+      std::unique_lock<std::mutex> lk(mutex_);
+      not_empty_.wait(lk, tok, [this]() { return !content_.empty(); });
+      item = std::move(content_.front());
+      content_.pop_front();
+    }
+    not_full_.notify_one();
+  }
+
+ private:
+  std::queue<T> content_;
+  size_t capacity_;
+
+  std::mutex mutex_;
+  std::condition_variable_any not_empty_;
+  std::condition_variable_any not_full_;
+};
